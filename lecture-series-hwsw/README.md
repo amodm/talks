@@ -9,5 +9,5 @@ Each lecture has a set of pre-reads that act as a primer, allowing students to e
 Each lecture also has a set of assignments, designed to explore some of the concepts at their own time, and in their own way. Most assignments would be useful to do in a group based setting. The assignments should be explored not as a _test_, but as _thinking material_.
 
 ## List of lectures
-* 2024-02-24 (Inside the Machine)[/amodm/talks/tree/main/lecture-series-hwsw/lecture-1-inside-the-machine) - this lecture covers basic computer architecture, designed to bring out principles that are useful in hardware & software. In terms of hardware, we cover CPU, Memory, PCIe, Storage. In terms of concepts, we cover Amdahl's Law, Latency, and how Throughput can be used to hide latency.
+* 2024-02-24 [Inside the Machine](lecture-1-inside-the-machine) - this lecture covers basic computer architecture, designed to bring out principles that are useful in hardware & software. In terms of hardware, we cover CPU, Memory, PCIe, Storage. In terms of concepts, we cover Amdahl's Law, Latency, and how Throughput can be used to hide latency.
 
