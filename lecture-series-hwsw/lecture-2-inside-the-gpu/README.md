@@ -7,10 +7,14 @@ This lecture is part of a [4-lecture series](..) covering hardware/software inte
 * Think about how should the performance of an internal GPU (the ones that are part of the CPU die/package) compare with an external discrete one.
 * Try to read up about WebGPU, whatever you can. It's ok if you don't understand it fully, or even at all, we'll cover some basics of it during our session anyways.
 
+## Files
+* [vec-multiply.html](vec-multiply.html) contains an end to end structure of a basic WebGPU program (focussed on computation, not rendering). You can use this to make a copy and quickly try out a new kernel.
+* [cpu-vs-gpu.html](cpu-vs-gpu.html) contains a set of test cases, and has slightly more complicated code to account for multiple kernels. Some of the assignments require you to go run these tests.
+
 ## Assignments
 * Try removing the `if` guard inside the kernel, and see what happens. What's your reasoning about the behaviour?
 * Implement a kernel logic that uses __bad__ spatial locality within the same workgroup.
 * Puzzle: Why is CPU time relatively so high for Num-Add-Mul, but GPU time not so?
-* Extend the CPU vs GPU html to implement basic matrix multiplication as a new test (assuming row major representation).
+* Extend the [cpu-vs-gpu.html](cpu-vs-gpu.html) to implement basic matrix multiplication as a new test (assuming row major representation). Raise a PR if it's working fine (I'll accept the first one, and from there on only improvements to the previous one).
 * Can merge sort can be considered as parallelisable? Why, or why not? If yes, try implementing and compare with CPU based mergesort.
 * Why should GPU memory need to be mapped before copy to CPU?
