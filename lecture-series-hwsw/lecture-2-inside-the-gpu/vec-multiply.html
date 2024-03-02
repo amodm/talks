@@ -29,12 +29,13 @@
             const workgroupSize = 64; // number of threads in a workgroup
             let numWorkgroups = Math.ceil(vec.length / workgroupSize);
             const maxWorkgroups = device.limits.maxComputeWorkgroupsPerDimension;
+            let countPerInvocation = 1;
             if (numWorkgroups > maxWorkgroups) {
                 numWorkgroups = maxWorkgroups;
                 countPerInvocation = Math.ceil(vec.length / (workgroupSize * numWorkgroups));
             }
             // the number of array elements that each thread will process
-            const countPerInvocation = Math.ceil(vec.length / (workgroupSize * numWorkgroups));
+            countPerInvocation = Math.ceil(vec.length / (workgroupSize * numWorkgroups));
             const totalExecutions = workgroupSize * numWorkgroups;
             log(`Will be doing total ${totalExecutions} shader invocations, each processing ${countPerInvocation} element${countPerInvocation > 1 ? 's' : ''}.`);
 
