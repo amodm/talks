@@ -13,8 +13,8 @@ This lecture is part of a [4-lecture series](..) covering hardware/software inte
 
 ## Assignments
 * Try removing the `if` guard inside the kernel, and see what happens. What's your reasoning about the behaviour?
-* Implement a kernel logic that uses __bad__ spatial locality within the same workgroup.
+* Implement a kernel logic that uses __bad__ spatial locality within the same workgroup. If you manage to do so in a way that demonstrates usefulness of spatial locality in kernels, raise a PR which contains both -ve (bad spatial locality) and +ve (good spatial locality), as tests under [cpu-vs-gpu.html](cpu-vs-gpu.html). I'll continue accepting PRs so long as the logic is different than existing ones.
 * Puzzle: Why is CPU time relatively so high for Num-Add-Mul, but GPU time not so?
 * Extend the [cpu-vs-gpu.html](cpu-vs-gpu.html) to implement basic matrix multiplication as a new test (assuming row major representation). Raise a PR if it's working fine (I'll accept the first one, and from there on only improvements to the previous one).
-* Can merge sort can be considered as parallelisable? Why, or why not? If yes, try implementing and compare with CPU based mergesort.
+* Can merge sort can be considered as parallelisable? Why, or why not? If yes, try implementing and compare with CPU based mergesort. Raise a PR as a test under [cpu-vs-gpu.html](cpu-vs-gpu.html).
 * Why should GPU memory need to be mapped before copy to CPU?
