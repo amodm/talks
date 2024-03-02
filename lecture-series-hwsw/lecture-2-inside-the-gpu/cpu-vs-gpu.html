@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>CPU vs GPU</title>
+    <script>
+        let btnElem, errorElem, logsElem, testElem, testDescrElem; // references to elements
+        let device, tsqEnabled; // gpu device and flag to indicate whether timestamp query is supported
+
+        const multiplier = Math.max(Math.floor(Math.random() * 256), 7); // constant used for the multiply test
+        const addConstant = Math.max(Math.floor(Math.random() * 256), 7); // constant used for the add test
+
+        /**
+         * Descriptors for the tests that can be run. Each descriptor contains the name of the
+         * test, a description, and the code for both CPU & GPU. The GPU code is in WGSL (WebGPU
+         * Shading Language).
+         */
+        const testDescriptors = [
+            // the multiply test
+            {
+                name: 'Multiply',
+                description: `This test multiplies each element of the input array by ${multiplier}.`,
+                cpuCode: (data) => {
+                    const result = new Uint32Array(data.length);
+                    for (let i = 0; i < data.length; i++) {
+                        result[i] = data[i] * multiplier;
+                    }
+                    return result;
+                },
+                gpuComputeShader: (data, wgSize, numWorkgroups) => {
+                    const batchSize = Math.ceil(data.length / (wgSize * numWorkgroups));
+                    return device.createShaderModule({
+                        label: `multiply shader`,
+                        code: `
+                            @group(0) @binding(0) var<storage, read_write> data: array<u32>;
+
+                            @compute @workgroup_size(${wgSize}) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                                let idx = id.x;
+                                for (var i = 0u; i < ${batchSize}u; i++) {
+                                    let index = idx * ${batchSize}u + i;
+                                    if (index < ${data.length}u) {
+                                        data[index] *= ${multiplier}u;
+                                    }
+                                }
+                            }
+                        `,
+                    });
+                }
+            },
+            // the addition test
+            {
+                name: 'Add',
+                description: `This test adds each element of the input array by ${addConstant}.`,
+                cpuCode: (data) => {
+                    const result = new Uint32Array(data.length);
+                    for (let i = 0; i < data.length; i++) {
+                        result[i] = data[i] + addConstant;
+                    }
+                    return result;
+                },
+                gpuComputeShader: (data, wgSize, numWorkgroups) => {
+                    const batchSize = Math.ceil(data.length / (wgSize * numWorkgroups));
+                    return device.createShaderModule({
+                        label: `add shader`,
+                        code: `
+                            @group(0) @binding(0) var<storage, read_write> data: array<u32>;
+
+                            @compute @workgroup_size(${wgSize}) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                                let idx = id.x;
+                                for (var i = 0u; i < ${batchSize}u; i++) {
+                                    let index = idx * ${batchSize}u + i;
+                                    if (index < ${data.length}u) {
+                                        data[index] += ${addConstant}u;
+                                    }
+                                }
+                            }
+                        `,
+                    });
+                }
+            },
+            // heavy calculation for each element (so we use lesser default size for this test)
+            {
+                name: 'Heavy',
+                description: `This test does some heavy calculation (cpu only) for every element in the array.`,
+                defaultSize: '1M',
+                cpuCode: (data) => {
+                    const result = new Uint32Array(data.length);
+                    for (let i = 0; i < data.length; i++) {
+                        let x = data[i];
+                        for (let j = 0; j < 100; j++) {
+                            let r = j % 32;
+                            x = ((x >> r) | (x << (32 - r))) & 0x1fffffff;
+                            x += i;
+                        }
+                        result[i] = x;
+                    }
+                    return result;
+                },
+                gpuComputeShader: (data, wgSize, numWorkgroups) => {
+                    const batchSize = Math.ceil(data.length / (wgSize * numWorkgroups));
+                    return device.createShaderModule({
+                        label: `add-every-3 shader`,
+                        code: `
+                            @group(0) @binding(0) var<storage, read_write> data: array<u32>;
+
+                            @compute @workgroup_size(${wgSize}) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                                let idx = id.x;
+                                for (var i = 0u; i < ${batchSize}u; i++) {
+                                    let index = idx * ${batchSize}u + i;
+                                    if (index < ${data.length}u) {
+                                        var x = data[index];
+                                        for (var j = 0u; j < 100u; j++) {
+                                            var r = j % 32u;
+                                            x = ((x >> r) | (x << (32u - r))) & 0x1fffffffu;
+                                            x += index;
+                                        }
+                                        data[index] = x;
+                                    }
+                                }
+                            }
+                        `,
+                    });
+                }
+            },
+            // heavy calculation for every 10th element.
+            {
+                name: 'Heavy-Every-10',
+                description: `This test does some heavy calculation (cpu only) for every 10th element in the array.`,
+                defaultSize: '1M',
+                cpuCode: (data) => {
+                    const result = new Uint32Array(data.length);
+                    result.set(data);
+                    for (let i = 0; i < data.length; i++) {
+                        if ((i % 10) === 0) {
+                            let x = data[i];
+                            for (let j = 0; j < 100; j++) {
+                                let r = j % 32;
+                                x = ((x >> r) | (x << (32 - r))) & 0x1fffffff;
+                                x += i;
+                            }
+                            result[i] = x;
+                        }
+                    }
+                    return result;
+                },
+                gpuComputeShader: (data, wgSize, numWorkgroups) => {
+                    const batchSize = Math.ceil(data.length / (wgSize * numWorkgroups));
+                    return device.createShaderModule({
+                        label: `add-every-3 shader`,
+                        code: `
+                            @group(0) @binding(0) var<storage, read_write> data: array<u32>;
+
+                            @compute @workgroup_size(${wgSize}) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                                let idx = id.x;
+                                for (var i = 0u; i < ${batchSize}u; i++) {
+                                    let index = idx * ${batchSize}u + i;
+                                    if (index < ${data.length}u && (index % 10u) == 0) {
+                                        var x = data[index];
+                                        for (var j = 0u; j < 100u; j++) {
+                                            var r = j % 32u;
+                                            x = ((x >> r) | (x << (32u - r))) & 0x1fffffffu;
+                                            x += index;
+                                        }
+                                        data[index] = x;
+                                    }
+                                }
+                            }
+                        `,
+                    });
+                }
+            },
+            // the index based add/multiply test, where if index is even we add, else we multiply
+            {
+                name: 'Idx-Add-Mul',
+                description: `This test mixes add & multiply. If the index is even, we add (+${addConstant}),
+                else we multiply (x${multiplier}). Note that this is different from the Num-Add-Mul test, which
+                does the same thing but on value instead of the index.`,
+                cpuCode: (data) => {
+                    const result = new Uint32Array(data.length);
+                    for (let i = 0; i < data.length; i++) {
+                        result[i] = ((i & 0x1) === 0) ? (data[i] + addConstant) : (data[i] * multiplier);
+                    }
+                    return result;
+                },
+                gpuComputeShader: (data, wgSize, numWorkgroups) => {
+                    const batchSize = Math.ceil(data.length / (wgSize * numWorkgroups));
+                    return device.createShaderModule({
+                        label: `idx-add-mul shader`,
+                        code: `
+                            @group(0) @binding(0) var<storage, read_write> data: array<u32>;
+
+                            @compute @workgroup_size(${wgSize}) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                                let idx = id.x;
+                                for (var i = 0u; i < ${batchSize}u; i++) {
+                                    let index = idx * ${batchSize}u + i;
+                                    if (index < ${data.length}u) {
+                                        if ((index & 0x1) == 0) {
+                                            data[index] += ${addConstant}u;
+                                        } else {
+                                            data[index] *= ${multiplier}u;
+                                        }
+                                    }
+                                }
+                            }
+                        `,
+                    });
+                }
+            },
+            // the data based add/multiply test, where if the number is even we add, else we multiply
+            {
+                name: 'Num-Add-Mul',
+                description: `This test mixes add & multiply. If the number is even, we add (+${addConstant}),
+                else we multiply (x${multiplier}). Note that this is different from the Alt-Add-Mul test, which
+                does the same thing but on index instead of the value.`,
+                cpuCode: (data) => {
+                    const result = new Uint32Array(data.length);
+                    for (let i = 0; i < data.length; i++) {
+                        result[i] = ((data[i] & 0x1) === 0) ? (data[i] + addConstant) : (data[i] * multiplier);
+                    }
+                    return result;
+                },
+                gpuComputeShader: (data, wgSize, numWorkgroups) => {
+                    const batchSize = Math.ceil(data.length / (wgSize * numWorkgroups));
+                    return device.createShaderModule({
+                        label: `num-add-mul shader`,
+                        code: `
+                            @group(0) @binding(0) var<storage, read_write> data: array<u32>;
+
+                            @compute @workgroup_size(${wgSize}) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                                let idx = id.x;
+                                for (var i = 0u; i < ${batchSize}u; i++) {
+                                    let index = idx * ${batchSize}u + i;
+                                    if (index < ${data.length}u) {
+                                        if ((data[index] & 0x1) == 0) {
+                                            data[index] += ${addConstant}u;
+                                        } else {
+                                            data[index] *= ${multiplier}u;
+                                        }
+                                    }
+                                }
+                            }
+                        `,
+                    });
+                }
+            },
+        ];
+
+        // run initialization steps when the DOM is ready
+        document.addEventListener('DOMContentLoaded', async () => {
+            // initialize references
+            btnElem = document.getElementById('btn');
+            errorElem = document.getElementById('error');
+            logsElem = document.getElementById('logs');
+            testElem = document.getElementById('test');
+            testDescrElem = document.getElementById('test-description');
+            const sizeElem = document.getElementById('size');
+
+            // populate test selector with all available tests
+            testElem.innerHTML += testDescriptors.map((desc, i) => `<option value="${i}">Test: ${desc.name}</option>`).join('');
+            testElem.addEventListener('change', (e) => {
+                const idx = parseInt(e.target.value);
+                const desc = idx >= 0 ? testDescriptors[idx] : undefined;
+                testDescrElem.innerHTML = desc?.description ?? '';
+                sizeElem.value = desc?.defaultSize ?? sizeElem.value;
+                sizeElem.focus();
+            });
+            testElem.dispatchEvent(new Event('change'));
+
+            // size input validation
+            parseSize(sizeElem.value);
+            sizeElem.addEventListener('input', (e) => {
+                try {
+                    parseSize(e.target.value);
+                    btnElem.disabled = false;
+                } catch (err) {
+                    btnElem.disabled = true;
+                }
+            });
+
+            // shortcut keys for size textbox
+            sizeElem.addEventListener('keyup', (e) => {
+                if (e.key === 'Enter') {
+                    // on press of Enter, send click to Compare button
+                    btnElem.dispatchEvent(new Event('click'));
+                } else if (e.key === 'l' || e.key === 'L') {
+                    // clear logs on Ctrl+L
+                    if (e.ctrlKey || e.metaKey) {
+                        document.getElementById('btn-clear').dispatchEvent(new Event('click'));
+                    }
+                }
+            });
+
+            // on press of Clear Logs button
+            document.getElementById('btn-clear').addEventListener('click', () => {
+                logsElem.textContent = '';
+                error(undefined);
+                console.clear();
+            });
+
+            // on press of Compare button
+            btnElem.addEventListener('click', async () => {
+                if (btnElem.disabled) {
+                    return;
+                }
+                error(undefined);
+                let arraySize = 0;
+                try {
+                    arraySize = parseSize(sizeElem.value);
+                } catch (err) {
+                    error(err.message);
+                }
+                if (!device) {
+                    ({ device, tsqEnabled } = await initializeGPU());
+                }
+
+                // prepare the dataset with random u32 numbers
+                const maxBufferSize = device.limits.maxBufferSize;
+                const maxBindingSize = device.limits.maxStorageBufferBindingSize;
+                const dataSize = arraySize * 4;
+                if (dataSize > maxBufferSize) {
+                    error(`Array of (${arraySize}) 32-bit numbers exceeds the maximum buffer size (${maxBufferSize} bytes)`);
+                } else if (dataSize > maxBindingSize) {
+                    error(`Array of (${arraySize}) 32-bit numbers exceeds the maximum storage buffer binding size (${maxBufferSize} bytes)`);
+                }
+                const data = new Uint32Array(arraySize);
+                const wgConfig = getWorkgroupConfiguration(data);
+
+                const btnText = btnElem.textContent;
+                try {
+                    btnElem.disabled = true;
+                    btnElem.textContent = 'Running...';
+                    // log the start of the test
+                    log(``);
+                    log(`--------------------------------------------`);
+                    const selectedTest = testDescriptors[parseInt(testElem.value)];
+                    log(`Testing "${selectedTest.name}"; size=${arraySize} u32; parallel=${wgConfig.degree}`);
+                    const max = 1 << 20;
+                    for (let i = 0; i < arraySize; i++) {
+                        data[i] = Math.floor(Math.random() * max);
+                    }
+
+                    // run the tests on CPU & GPU
+                    const cpuResult = testCompute(data, selectedTest);
+                    const gpuResult = await testGPU(data, selectedTest, wgConfig);
+
+                    // just to be sure, we check if the results match or not
+                    const mismatchIdx = mismatchingIndex(cpuResult, gpuResult);
+                    if (mismatchIdx !== undefined) {
+                        if (mismatchIdx === -1) {
+                            error(`CPU & GPU results have different lengths, e.g. ${cpuResult.length} != ${gpuResult.length}`);
+                        } else {
+                            error(`CPU & GPU results do not match: cpu[${mismatchIdx}](${cpuResult[mismatchIdx]}) != gpu[${mismatchIdx}](${gpuResult[mismatchIdx]})`);
+                        }
+                    }
+                } finally {
+                    btnElem.textContent = btnText;
+                    btnElem.disabled = false;
+                }
+            });
+        });
+
+        /**
+         * Initializes the GPU and returns the device and whether timestamp query is supported.
+         */
+         async function initializeGPU() {
+            log(`---- Initializing GPU ----`);
+            let start = performance.now();
+            const adapter = await navigator.gpu?.requestAdapter();
+            if (!adapter) {
+                error("No gpu adaptor found. Is webGPU supported by this browser?");
+            }
+            const tsqEnabled = adapter.features.has('timestamp-query');
+            if (!tsqEnabled) {
+                logSub(`** warning ** timestamp query is not supported`);
+            }
+            const device = await adapter.requestDevice({ requiredFeatures: tsqEnabled ? ['timestamp-query'] : []});
+            if (!device) {
+                error("No gpu device found");
+            }
+            logSub(`device initialization: ${(performance.now() - start).toFixed(2)} ms`);
+            logSub(`max workgroups: ${device.limits.maxComputeWorkgroupsPerDimension}`);
+            logSub(`max workgroup size: ${device.limits.maxComputeInvocationsPerWorkgroup}`);
+            logSub(`max storage buffer binding size (bytes): ${device.limits.maxStorageBufferBindingSize}`);
+            return { device, tsqEnabled };
+        }
+
+        /**
+         * @returns the optimal workgroup configuration with workgroup size, number of workgroups,
+         * and batch size
+         */
+        function getWorkgroupConfiguration(data) {
+            const degree = document.getElementById('parallel-setting').value;
+            let wgSize = 64; // size of an individual workgroup
+            let numWorkgroups = Math.ceil(data.length / wgSize); // number of workgroups
+            let batchSize = 1; // number of indexes we process in a single shader invocation
+            if (degree === 'max') {
+                const maxWGSize = device.limits.maxComputeInvocationsPerWorkgroup;
+                const maxWorkgroups = device.limits.maxComputeWorkgroupsPerDimension;
+                while (numWorkgroups > maxWorkgroups) {
+                    wgSize *= 2;
+                    const newNumWG = Math.ceil(data.length / wgSize);
+                    if (newNumWG > maxWorkgroups) {
+                        numWorkgroups = maxWorkgroups;
+                        break;
+                    } else {
+                        numWorkgroups = newNumWG;
+                    }
+                }
+                batchSize = Math.ceil(data.length / (wgSize * numWorkgroups));
+            } else if (degree === 'min') {
+                batchSize = data.length; // we process all data in a single shader invocation
+                wgSize = 1;
+                numWorkgroups = 1;
+            } else {
+                error(`Invalid degree of parallelisation: ${degree}`);
+            }
+            return { wgSize, numWorkgroups, batchSize, degree }
+        }
+
+        /**
+         * Execute `selectedTest` on CPU, using `data` as input.
+         */
+        function testCompute(data, selectedTest) {
+            log(`---- CPU Performance ----`);
+            const op = (input) => {
+                return selectedTest.cpuCode(input);
+            };
+            // warm up
+            op(data);
+
+            // test
+            const start = performance.now();
+            const result = op(data);
+            const end = performance.now();
+            logSub(`time: ${(end - start).toFixed(2)} ms`);
+
+            return result;
+        }
+
+        /**
+         * Execute `selectedTest` on GPU, using `data` as input.
+         */
+        async function testGPU(data, selectedTest, workgroupConfig) {
+            log(`---- GPU Performance ----`);
+            let { wgSize, numWorkgroups, batchSize, _ } = workgroupConfig;
+            logSub(`workgroup size: ${wgSize}, num workgroups: ${numWorkgroups}, batch size: ${batchSize}`);
+
+            const shaderStart = performance.now();
+            const module = selectedTest.gpuComputeShader(data, wgSize, numWorkgroups);
+            // it's not necessary for us to wait for compilation, but this is an explainer
+            // code, so we wait for the compilation to complete before proceeding.
+            const compileInfo = await module.getCompilationInfo();
+            for (const m of compileInfo.messages) {
+                logSub(`shader compilation message: ${m.type} @${m.lineNum}:${m.linePos} ${m.message}`);
+            }
+            logSub(`shader compilation: ${(performance.now() - shaderStart).toFixed(2)} ms`);
+            const pipeline = device.createComputePipeline({
+                layout: 'auto',
+                compute: {
+                    module,
+                    entryPoint: 'main',
+                },
+            });
+
+            const gpuBuffer = device.createBuffer({
+                size: data.byteLength,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+            });
+            const outputBuffer = device.createBuffer({
+                size: data.byteLength,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+            const tsqSet = tsqEnabled ? device.createQuerySet({
+                type: 'timestamp',
+                count: 2,
+            }) : undefined;
+            const tsqBuffer = tsqEnabled ? device.createBuffer({
+                size: 8 * tsqSet.count,
+                usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+            }) : undefined;
+            const tsqOutputBuffer = tsqEnabled ? device.createBuffer({
+                size: tsqBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            }) : undefined;
+            const bindGroup = device.createBindGroup({
+                layout: pipeline.getBindGroupLayout(0),
+                entries: [
+                    { binding: 0, resource: { buffer: gpuBuffer } },
+                ],
+            });
+
+            const op = async () => {
+                const gpu2cpuStart = performance.now();
+                device.queue.writeBuffer(gpuBuffer, 0, data);
+                const cpu2gpuTransferTime = performance.now() - gpu2cpuStart;
+
+                const encoder = device.createCommandEncoder();
+                const descriptor = tsqEnabled ? {
+                    timestampWrites: {
+                        querySet: tsqSet,
+                        beginningOfPassWriteIndex: 0,
+                        endOfPassWriteIndex: 1,
+                    },
+                } : undefined;
+                const pass = encoder.beginComputePass(descriptor);
+                pass.setPipeline(pipeline);
+                pass.setBindGroup(0, bindGroup);
+                pass.dispatchWorkgroups(numWorkgroups);
+                pass.end();
+                encoder.copyBufferToBuffer(gpuBuffer, 0, outputBuffer, 0, data.byteLength);
+                tsqEnabled && encoder.resolveQuerySet(tsqSet, 0, 2, tsqBuffer, 0);
+                tsqEnabled && encoder.copyBufferToBuffer(tsqBuffer, 0, tsqOutputBuffer, 0, tsqBuffer.size);
+                const commandBuffer = encoder.finish();
+
+                device.queue.submit([commandBuffer]);
+                await device.queue.onSubmittedWorkDone();
+
+                // read timestamps
+                let gpuComputeTime = 0;
+                if (tsqEnabled) {
+                    await tsqOutputBuffer.mapAsync(GPUMapMode.READ);
+                    const timestamps = new BigUint64Array(tsqOutputBuffer.getMappedRange().slice());
+                    gpuComputeTime = Number(timestamps[1] - timestamps[0]) / 1e6;
+                    tsqOutputBuffer.unmap();
+                }
+
+                // read results
+                const cpu2gpuStart = performance.now();
+                await outputBuffer.mapAsync(GPUMapMode.READ);
+                const result = new Uint32Array(outputBuffer.getMappedRange().slice());
+                const gpu2cpuTransferTime = performance.now() - cpu2gpuStart;
+                outputBuffer.unmap();
+                return { result, cpu2gpuTransferTime, gpuComputeTime, gpu2cpuTransferTime };
+            }
+
+            // warm up
+            await op();
+
+            // test
+            const { result, cpu2gpuTransferTime, gpuComputeTime, gpu2cpuTransferTime } = await op();
+            logSub(`cpu->gpu copy (incl cmd overhead): ${cpu2gpuTransferTime.toFixed(2)} ms`);
+            logSub(`gpu computation (incl gpu->gpu copy): ${gpuComputeTime.toFixed(2)} ms`);
+            logSub(`gpu->cpu copy (incl cmd overhead): ${gpu2cpuTransferTime.toFixed(2)} ms`);
+
+            gpuBuffer.destroy();
+            outputBuffer.destroy();
+            tsqBuffer?.destroy();
+            tsqSet?.destroy();
+            tsqOutputBuffer?.destroy();
+
+            return result;
+        }
+
+        /**
+         * Logs `msg` to the logs element, with optional indentation.
+         */
+        function log(msg, indent = 0) {
+            logsElem.textContent += `${' '.repeat(indent)}${msg}\n`;
+        }
+        /**
+         * Logs `msg` to the logs element as a sub-item, i.e. with 4 spaces of indentation.
+         */
+        const logSub = (msg) => log(msg, 4);
+
+        /**
+         * Shows `msg` as an error, and throws an Error with the same message.
+         */
+        function error(msg) {
+            if (msg) {
+                errorElem.textContent = msg;
+                errorElem.style.display = 'block';
+                throw new Error(msg);
+            } else {
+                errorElem.textContent = '';
+                errorElem.style.display = 'none';
+            }
+        }
+
+        /**
+         * @returns {number} size in bytes, e.g. 10M -> 10 * 1024 * 1024
+         */
+        function parseSize(value) {
+            const sizeStr = value.trim().toLowerCase();
+            if (!sizeStr.match(/^\d+(?:[km]b?)?$/)) {
+                throw new Error(`Invalid size: ${sizeStr}`);
+            }
+            let lastChar = sizeStr.charAt(sizeStr.length - 1);
+            if (lastChar === 'b') {
+                sizeStr = sizeStr.slice(0, -1);
+                lastChar = sizeStr.charAt(sizeStr.length - 1);
+            }
+            let size = 0;
+            if (lastChar === 'k') {
+                size = parseInt(sizeStr.slice(0, -1)) * 1024;
+            } else if (lastChar === 'm') {
+                size = parseInt(sizeStr.slice(0, -1)) * 1024 * 1024;
+            } else {
+                size = parseInt(sizeStr);
+            }
+            return size;
+        }
+
+        /**
+         * @returns {number} index of the first mismatching element, -1 if lengths are different, or undefined if arrays are equal
+         */
+        function mismatchingIndex(arr1, arr2) {
+            if (arr1.length !== arr2.length) {
+                return -1;
+            }
+            for (let i = 0; i < arr1.length; i++) {
+                if (arr1[i] !== arr2[i]) {
+                    return i;
+                }
+            }
+            return undefined;
+        }
+    </script>
+    <style>
+        html {
+            /* copied gratefully from skeleton.dev */
+            background-image: radial-gradient(at 0% 0%, rgba(79, 70, 229, 0.33) 0px, rgba(0, 0, 0, 0) 50%), radial-gradient(at 98% 1%, rgba(212, 25, 118, 0.33) 0px, rgba(0, 0, 0, 0) 50%);
+            background-attachment: fixed;
+            background-repeat: no-repeat;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 768px;
+        }
+        p {
+            line-height: 1.5;
+        }
+
+        /* padding */
+        .pt-4, .py-4, .p-4 {
+            padding-top: 1rem;
+        }
+        .pb-4, .py-4, .p-4 {
+            padding-bottom: 1rem;
+        }
+        .pl-4, .px-4, .p-4 {
+            padding-left: 1rem;
+        }
+        .pr-4, .px-4, .p-4 {
+            padding-right: 1rem;
+        }
+
+        /* margins */
+        .mt-4, .my-4, .m-4 {
+            margin-top: 1rem;
+        }
+        .mb-4, .my-4, .m-4 {
+            margin-bottom: 1rem;
+        }
+        .ml-4, .mx-4, .m-4 {
+            margin-left: 1rem;
+        }
+        .mr-4, .mx-4, .m-4 {
+            margin-right: 1rem;
+        }
+
+        /* spacing */
+        .space-y-4 > :not(:last-child) {
+            margin-bottom: 1rem;
+        }
+        .space-y-6 > :not(:last-child) {
+            margin-bottom: 1.5rem;
+        }
+        .space-y-8 > :not(:last-child) {
+            margin-bottom: 2rem;
+        }
+        .space-x-2 > :not(:last-child) {
+            margin-right: 0.5rem;
+        }
+        .space-x-4 > :not(:last-child) {
+            margin-right: 1rem;
+        }
+        .space-x-6 > :not(:last-child) {
+            margin-right: 1.5rem;
+        }
+        .space-x-8 > :not(:last-child) {
+            margin-right: 2rem;
+        }
+
+        /* height */
+        .h-screen {
+            height: 100vh;
+        }
+
+        .mx-auto {
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .text-center {
+            text-align: center;
+        }
+        .text-right {
+            text-align: right;
+        }
+        .text-xs {
+            font-size: 0.75rem;
+        }
+        .text-sm {
+            font-size: 0.875rem;
+        }
+        .cursor-pointer {
+            cursor: pointer;
+        }
+        .btn-main, .btn-secondary {
+            border-radius: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-width: 1px;
+            border-color: #0c9567;
+            border-style: solid;
+            background-color: #95e0c7;
+        }
+        .btn-main:hover {
+            filter: brightness(1.05);
+        }
+        .btn-secondary {
+            background-color: #ddf5ed;
+            color: #0c9567;
+        }
+        .btn-secondary:hover {
+            filter: brightness(0.95);
+        }
+        div {
+            margin-bottom: 10px;
+        }
+        #error {
+            display: none;
+            color: #dc2626;
+            font-weight: bold;
+        }
+        .flex-row {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: center;
+        }
+        hr {
+            border: 0;
+            border-top: 1px solid #a2a8b0;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body class="space-y-6 p-4 mx-auto h-screen">
+    <header class="space-y-4 text-center p-4">
+        <h1>CPU ⚔️ GPU</h1>
+        <p>Explore performance of specific types of computations on CPU vs on GPU.</p>
+    </header>
+    <main class="space-y-6">
+        <div class="space-y-4">
+            <div class="space-x-6 flex-row">
+                <select id="test"></select>
+                <label class="text-sm"><input type="text" id="size" class="text-right" size="8" required value="10M" placeholder="4k, 10M" /> numbers</label>
+                <label class="text-sm"><select id="parallel-setting">
+                    <option value="max">Maximum</option>
+                    <option value="min">Minimum</option>
+                </select> parallelisation</label>
+            </div>
+            <div class="text-center flex-row space-x-6">
+                <button id="btn" class="cursor-pointer btn-main">Compare</button>
+                <button id="btn-clear" class="cursor-pointer btn-secondary">Clear Logs</button>
+            </div>
+            <div id="error" class="text-center text-sm"></div>
+            <p id="test-description" class="text-center"></p>
+        </div>
+        <hr />
+        <pre id="logs"></pre>
+    </main>
+</body>
+</html>

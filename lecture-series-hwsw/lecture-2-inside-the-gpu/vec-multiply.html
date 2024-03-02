@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Vec Multiplication on GPU</title>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            log(`Initializing data at random`);
+            const multiplier = 23; // the number that we multiply with
+            const vec = new Uint32Array(1024 * 1024); // 1M 32-bit numbers
+            // populate random data
+            for (let i = 0; i < vec.length; i++) {
+                vec[i] = Math.floor(Math.random() * (1 << 20));
+            }
+
+            // initialize the device
+            log(`Initializing GPU`);
+            const adapter = await navigator.gpu?.requestAdapter();
+            if (!adapter) {
+                die('WebGPU not supported, or no adapters available');
+            }
+            const device = await adapter.requestDevice();
+            if (!device) {
+                die('No device found');
+            }
+            log(`GPU initialized`);
+
+            // break down the work into individual units of work
+            const workgroupSize = 64; // number of threads in a workgroup
+            let numWorkgroups = Math.ceil(vec.length / workgroupSize);
+            const maxWorkgroups = device.limits.maxComputeWorkgroupsPerDimension;
+            if (numWorkgroups > maxWorkgroups) {
+                numWorkgroups = maxWorkgroups;
+                countPerInvocation = Math.ceil(vec.length / (workgroupSize * numWorkgroups));
+            }
+            // the number of array elements that each thread will process
+            const countPerInvocation = Math.ceil(vec.length / (workgroupSize * numWorkgroups));
+            const totalExecutions = workgroupSize * numWorkgroups;
+            log(`Will be doing total ${totalExecutions} shader invocations, each processing ${countPerInvocation} element${countPerInvocation > 1 ? 's' : ''}.`);
+
+            // create a buffer to hold the input data
+            log(`Creating buffer for input data`);
+            const gpuInputBuffer = device.createBuffer({
+                size: vec.byteLength,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+            });
+
+            // create a buffer to hold the output data
+            log(`Creating buffer for output data`);
+            const gpuOutputBuffer = device.createBuffer({
+                size: vec.byteLength,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+
+            // create the compute kernel
+            log(`Creating compute kernel`);
+            const module = device.createShaderModule({
+                code: `
+                    @group(0) @binding(0) var<storage, read_write> data: array<u32>;
+
+                    @compute @workgroup_size(${workgroupSize})
+                    fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                        let start = global_id.x * ${countPerInvocation};
+                        let dataLen = arrayLength(&data);
+                        for (var i = 0u; i < ${countPerInvocation}u; i++) {
+                            let idx = start + i;
+                            if (idx < dataLen) {
+                                data[idx] *= ${multiplier};
+                            }
+                        }
+                    }
+                `,
+            });
+
+            // create pipeline
+            log(`Creating pipeline`);
+            const pipeline = device.createComputePipeline({
+                layout: 'auto',
+                compute: {
+                    module,
+                    entryPoint: 'main',
+                },
+            });
+
+            // create bindgroup, making the gpuInputBuffer available to the compute kernel
+            log(`Creating bind group`);
+            const bindGroup = device.createBindGroup({
+                layout: pipeline.getBindGroupLayout(0),
+                entries: [
+                    { binding: 0, resource: { buffer: gpuInputBuffer } },
+                ],
+            });
+
+            // copy the input data to the GPU
+            log(`Copying input data to GPU`);
+            device.queue.writeBuffer(gpuInputBuffer, 0, vec);
+
+            // encode commands to the GPU
+            log(`Creating command encoder`);
+            const encoder = device.createCommandEncoder();
+            const pass = encoder.beginComputePass();
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, bindGroup);
+            pass.dispatchWorkgroups(numWorkgroups);
+            pass.end();
+            // copy gpu->gpu buffer to an area where we can read from
+            encoder.copyBufferToBuffer(gpuInputBuffer, 0, gpuOutputBuffer, 0, vec.byteLength);
+            const cmdBuffer = encoder.finish();
+
+            // submit the commands to the GPU
+            log(`Submitting commands to GPU`);
+            device.queue.submit([cmdBuffer]);
+
+            // wait for the GPU computation to finish
+            log(`Waiting for GPU computation to finish`);
+            await device.queue.onSubmittedWorkDone();
+
+            // read results back from the GPU
+            log(`Reading results back from GPU`);
+            await gpuOutputBuffer.mapAsync(GPUMapMode.READ); // wait for GPU mem to be mapped
+            try {
+                const result = new Uint32Array(gpuOutputBuffer.getMappedRange());
+                // verify the results - this is only educational here,
+                // and not usually done in a real-world scenario
+                log(`Verifying results`);
+                let allGood = true;
+                for (let i = 0; i < vec.length; i++) {
+                    if (result[i] !== vec[i] * multiplier) {
+                        allGood = false;
+                        break;
+                    }
+                }
+                allGood ? log(`All good. Results verified.`) : die(`Results verification failed`);
+            } finally {
+                gpuOutputBuffer.unmap(); // unmap GPU mem
+            }
+        });
+
+        let startTime = 0;
+        /**
+         * Log the specified `msg` to the logs area.
+         */
+        function log(msg, type='INFO') {
+            if (startTime === 0) {
+                startTime = performance.now();
+            }
+            const deltaTime = (performance.now() - startTime).toFixed(1).padStart(7, ' ');
+            document.getElementById('logs').textContent += `[${deltaTime} ms] [${type}] ${msg}\n`;
+        }
+
+        /**
+         * Log error `msg`, and then throw an Error object with the same msg.
+         */
+        function die(msg) {
+            log('Error: ' + msg, 'ERROR');
+            throw new Error(msg);
+        }
+    </script>
+    <style>
+        html {
+            /* copied gratefully from skeleton.dev */
+            background-image: radial-gradient(at 0% 0%, rgba(79, 70, 229, 0.33) 0px, rgba(0, 0, 0, 0) 50%), radial-gradient(at 98% 1%, rgba(212, 25, 118, 0.33) 0px, rgba(0, 0, 0, 0) 50%);
+            background-attachment: fixed;
+            background-repeat: no-repeat;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 768px;
+            margin: auto;
+        }
+        h1 {
+            text-align: center;
+            margin-top: 2rem;
+        }
+        p {
+            line-height: 1.5;
+        }
+        #logs {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin-top: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>Vec Multiplication on GPU</h1>
+    <p>
+        We multiply a vector (i.e. an array) of numbers with a scalar (a number).
+        This page is optimised to simply demonstrate a basic GPU code workflow,
+        so to run this again, reload the page. Alternatively, see
+        <a href="cpu-vs-gpu.html" target="_blank">cpu-vs-gpu.html</a> for a more
+        interactive experience.
+    </p>
+    <pre id="logs"></pre>
+</body>
+</html>
