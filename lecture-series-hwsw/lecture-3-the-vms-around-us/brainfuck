@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+
+# This is a python based interpreter for the Brainfuck language.
+#
+# Example invocation:
+# ./brainfuck '++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.'
+
+from typing import NoReturn
+import os, sys
+
+OPCODE_INC_DP = ord('>')    # increment current data ptr
+OPCODE_DEC_DP = ord('<')    # decrement current data ptr
+OPCODE_INC_DATA = ord('+')  # increment data at current ptr
+OPCODE_DEC_DATA = ord('-')  # decrement data at current ptr
+OPCODE_OUTB = ord('.')      # write the byte at current data ptr to stdout
+OPCODE_INPB = ord(',')      # read byte and store at current data ptr
+OPCODE_JMP_IFZ = ord('[')   # if data at current ptr is zero, jump to matching ']'
+OPCODE_LOOP_IFNZ = ord(']') # if data at current ptr is non-zero, loop back to matching '['
+
+
+class BrainfuckVM:
+    """
+    A VM for Brainfuck language, which treats each of the 8 instructions as an opcode,
+    and modifies the state of the VM appropriately.
+
+    This class could easily have been a single function, but I wanted to give a sense
+    of a "machine's state", as in a VM. Goal is to communicate the idea that there's
+    really no such thing as "source code" vs "machine code" - what really matter is a
+    machine that understands that "language".
+
+    This is a super-inefficient code written for educatinal purposes only. Anyhow, if
+    you're using Brainfuck for production, and need warranties for this code, you're
+    either a maniac and a danger to society, or in serious need of help.
+    """
+    def __init__(self) -> None:
+        # memory model for this VM is a linear array of numbers, and at any point in time
+        # there's a pointer to the current position in that array.
+        self.data = [0]
+        self.data_ptr = 0
+        self.pc = 0 # program counter
+
+    @property
+    def current_byte(self) -> int:
+        """Data at current pointer"""
+        return self.data[self.data_ptr]
+
+    @current_byte.setter    
+    def current_byte(self, value: int):
+        """Set the data at current pointer"""
+        self.data[self.data_ptr] = value
+
+    def op_inc_dp(self):
+        """Increment data pointer"""
+        self.data_ptr += 1
+        if self.data_ptr >= len(self.data):
+            assert self.data_ptr == len(self.data)
+            self.data.append(0)
+
+    def op_dec_dp(self):
+        """Decrement data pointer"""
+        self.data_ptr -= 1
+        if self.data_ptr < 0:
+            self.invalid_code("-ve data ptr")
+
+    def op_inc_data(self):
+        """Increment data at current data pointer"""
+        self.current_byte += 1
+
+    def op_dec_data(self):
+        """Decrement data at current data pointer"""
+        self.current_byte -= 1
+
+    def op_write(self):
+        """Write data at current data pointer to stdout"""
+        print(chr(self.current_byte), end="")
+
+    def op_read(self):
+        """Read data from stdin and store at current data pointer"""
+        inb = sys.stdin.read(1)
+        if len(inb) == 0:
+            self.invalid_code("no input")
+        else:
+            self.current_byte = inb[0]
+
+    def op_jmp_if_zero(self, instructions: bytes):
+        """If data at current data pointer is zero, jump to the matching ]"""
+        if self.current_byte == 0:
+            balance = 0
+            new_pc = self.pc
+            while new_pc < len(instructions):
+                new_pc += 1
+                b = instructions[new_pc]
+                if b == OPCODE_JMP_IFZ:
+                    balance += 1
+                elif b == OPCODE_LOOP_IFNZ:
+                    if balance == 0:
+                        break
+                    else:
+                        balance -= 1
+            if new_pc >= len(instructions):
+                self.invalid_code("cannot find matching loop close")
+            else:
+                self.pc = new_pc
+
+    def op_loop_if_non_zero(self, instructions: bytes):
+        """If data at current data pointer is non-zero, loop back to the matching ["""
+        if self.current_byte != 0:
+            balance = 0
+            new_pc = self.pc
+            while new_pc > 0:
+                new_pc -= 1
+                b = instructions[new_pc]
+                if b == OPCODE_LOOP_IFNZ:
+                    balance += 1
+                elif b == OPCODE_JMP_IFZ:
+                    if balance == 0:
+                        break
+                    else:
+                        balance -= 1
+            if new_pc < 0:
+                self.invalid_code("cannot trace back to loop open")
+            else:
+                self.pc = new_pc
+
+    def run(self, instructions: bytes):
+        """Start executing the specified instructions"""
+        while self.pc < len(instructions):
+            instr = code[self.pc]
+            if instr == OPCODE_INC_DP:
+                self.op_inc_dp()
+            elif instr == OPCODE_DEC_DP:
+                self.op_dec_dp()
+            elif instr == OPCODE_INC_DATA:
+                self.op_inc_data()
+            elif instr == OPCODE_DEC_DATA:
+                self.op_dec_data()
+            elif instr == OPCODE_OUTB:
+                self.op_write()
+            elif instr == OPCODE_INPB:
+                self.op_read()
+            elif instr == OPCODE_JMP_IFZ:
+                self.op_jmp_if_zero(instructions)
+            elif instr == OPCODE_LOOP_IFNZ:
+                self.op_loop_if_non_zero(instructions)
+            # else: we skip over invalid instructions
+            self.pc += 1 # increment pc
+
+    def invalid_code(self, error: str, loc = None) -> NoReturn:
+        """Raise an exception for invalid code"""
+        loc = loc or self.pc
+        raise Exception(f"invalid code @{loc} - {error}")
+
+
+def usage(err: str) -> NoReturn:
+    """Print usage and exit"""
+    if err:
+        print(f"error: {err}")
+    prog_name = sys.argv[0]
+    print(f"usage: {prog_name} <code|code_file>")
+    sys.exit(1 if err else 0)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        usage("missing code")
+    else:
+        arg_opt = sys.argv[1]
+        if arg_opt == "-h" or arg_opt == "--help":
+            usage()
+        if arg_opt == "-":
+            code = sys.stdin.read()
+        elif arg_opt == "hello":
+            code = bytes("""
+            ++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.
+            +++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.
+            """, "utf-8")
+        elif os.path.isfile(arg_opt):
+            with open(arg_opt, 'r') as fp:
+                code = fp.read()
+        else:
+            code = bytes(arg_opt, "utf-8")
+
+    vm = BrainfuckVM()
+    vm.run(code)
