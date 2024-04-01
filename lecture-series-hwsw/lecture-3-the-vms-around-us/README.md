@@ -1,4 +1,4 @@
-# Inside the GPU
+# The VMs around us
 This lecture is part of a [4-lecture series](..) covering hardware/software interaction. This one covers the design & architecture of Virtual Machines. We start with trying to describe the key components of a VM, and apply that understanding to do a survey of existing VMs, and take a peek into their design decisions.
 
 ## Pre-read
