@@ -1,6 +1,8 @@
 # Inside the Machine
 This lecture is part of a [4-lecture series](..) covering hardware/software interaction. This one covers basic computer architecture, designed to bring out principles that are useful in hardware & software. In terms of hardware, we cover CPU, Memory, PCIe, Storage. In terms of concepts, we cover Amdahl's Law, Latency, and how Throughput can be used to hide latency.
 
+[![Link to video](https://img.youtube.com/vi/_ctfNRwqfls/0.jpg)](https://youtu.be/_ctfNRwqfls)
+
 ## Pre-read
 * Look at how Intel describes the specs of a typical CPU, say [Core i9 1300](https://ark.intel.com/content/www/us/en/ark/products/230499/intel-core-i9-13900-processor-36m-cache-up-to-5-60-ghz.html). Think about which factors you would consider as more important than the others. How does your current CPU rank on those factors? Compare notes with friends.
 * Compare the Core i9 1300 above (which is a consumer class CPU) with server processors (say [Xeon 6530](https://ark.intel.com/content/www/us/en/ark/products/237249/intel-xeon-gold-6530-processor-160m-cache-2-1-ghz.html)). What are the differences? Why do you think those differences exist?
