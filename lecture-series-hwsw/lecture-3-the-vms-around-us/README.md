@@ -1,6 +1,8 @@
 # The VMs around us
 This lecture is part of a [4-lecture series](..) covering hardware/software interaction. This one covers the design & architecture of Virtual Machines. We start with trying to describe the key components of a VM, and apply that understanding to do a survey of existing VMs, and take a peek into their design decisions.
 
+[![Link to video](https://img.youtube.com/vi/9srvmoItiZ0/0.jpg)](https://youtu.be/9srvmoItiZ0)
+
 ## Pre-read
 * Browse through the [JVM's spec](https://docs.oracle.com/javase/specs/jvms/se8/html/). Feel free to take a look around whatever you feel like, but definitely give [Chapter 2](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html) a read (2.5, 2.6 & 2.11 being the most important). As always, you don't have to understand everything (or even anything) - but it'll help prime your mind for our class.
 * Java & Kotlin are two prominent languages (amongst others) that run on top of JVM - proof that JVM is a bit disjointed from the Java language itself. Is it possible to create a non-garbage-collected language on the JVM?
