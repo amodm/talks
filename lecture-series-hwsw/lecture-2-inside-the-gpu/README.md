@@ -1,6 +1,8 @@
 # Inside the GPU
 This lecture is part of a [4-lecture series](..) covering hardware/software interaction. This one covers GPU architecture & programming models for GPUs. We explore what makes a GPU distinct from a CPU at a hardware level, is it even different at all, and why they excel in areas where they do. During this process, we try to imagine GPU programming models should be like, and in what ways our imagination vs reality agree & disagree. Throughout all of this, we use WebGPU as a way to explore the software API side of things.
 
+[![Link to video](https://img.youtube.com/vi/pHD_hTP5_uQ/0.jpg)](https://youtu.be/pHD_hTP5_uQ)
+
 ## Pre-read
 * Which is faster - CPU or GPU? Try to do whatever research you can on the subject.
 * Look up the specs of a few GPUs. Which specs do you think are more important in characterising the expected performance?
