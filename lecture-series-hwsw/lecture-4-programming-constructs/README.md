@@ -1,6 +1,8 @@
 # Programming Constructs
 This lecture is part of a [4-lecture series](..) covering hardware/software interaction. In this specific lecture, we explore under the hood details of selected programming constructs, such as variables, functions, classes, try/catch etc. We try to imagine how they might be implemented at a hardware level, and validate our understanding with actuals. In the process, we develop a deeper understanding of these constructs in programming languages.
 
+[![Link to video](https://img.youtube.com/vi/B4wex3APO0Q/0.jpg)](https://youtu.be/B4wex3APO0Q)
+
 ## Pre-read
 * Which language is faster? C? Java? Rust? Go? Is speed a "language" thing?
 * ⁠Go through [this article](https://www.scaler.com/topics/c/memory-layout-in-c/) to understand memory layouts of running programs. You don't have to understand the C part, focus on just the high level picture & understanding.
